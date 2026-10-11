@@ -21,6 +21,32 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: docker build -t discord-matrix-voice:ci .
+      - name: Smoke-test the image
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The native DAVE module (glibc prebuilt) and the other runtime
+          # dependencies load in the distroless image. @discordjs/voice
+          # loads @snazzah/davey lazily, so import it explicitly.
+          report=$(docker run --rm discord-matrix-voice:ci --input-type=module -e "
+            const davey = await import('@snazzah/davey');
+            await import('opusscript');
+            await import('werift');
+            const voice = await import('@discordjs/voice');
+            console.log('davey exports:', Object.keys(davey).length);
+            console.log(voice.generateDependencyReport());")
+          echo "$report"
+          grep -q '^davey exports: [1-9]' <<<"$report"
+          grep -Eq '@snazzah/davey: [0-9]' <<<"$report"
+          # The default command starts the bridge; without settings it must
+          # stop with the configuration error, not a module or library error.
+          set +e
+          output=$(docker run --rm discord-matrix-voice:ci 2>&1)
+          status=$?
+          set -e
+          echo "$output"
+          [[ $status -ne 0 ]]
+          grep -q 'missing required environment variable' <<<"$output"
 
   # Every tested commit on main is published as
   # ghcr.io/<owner>/discord-matrix-voice:<first 12 hex digits of the commit>
