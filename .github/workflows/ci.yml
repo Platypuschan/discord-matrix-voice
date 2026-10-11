@@ -21,3 +21,30 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: docker build -t discord-matrix-voice:ci .
+
+  # Every tested commit on main is published as
+  # ghcr.io/<owner>/discord-matrix-voice:<first 12 hex digits of the commit>
+  # (never overwritten; the NS8 module pins one of these) and :main.
+  publish:
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build and push the image
+        shell: bash
+        env:
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          image="ghcr.io/${OWNER,,}/discord-matrix-voice"
+          tag="${GITHUB_SHA::12}"
+          printf '%s' "$REGISTRY_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          docker build --label "org.opencontainers.image.revision=${GITHUB_SHA}" -t "${image}:${tag}" -t "${image}:main" .
+          docker push "${image}:${tag}"
+          docker push "${image}:main"
+          echo "Published \`${image}:${tag}\`" >> "$GITHUB_STEP_SUMMARY"
